@@ -105,7 +105,7 @@ Example payload:
 Path: `$.meters.load.agg_p_mw` extracts `1500`.
 
 ### Expressions
-Powered by [evalexpr](https://github.com/leobert/evalexpr), you can perform arithmetic on the extracted values.
+Powered by [evalexpr](https://crates.io/crates/evalexpr), you can perform arithmetic on the extracted values.
 Example: `value / 1000.0` to convert milliwatts to watts.
 
 ## License
