@@ -15,6 +15,7 @@ struct Config {
     mqtt_port: u16,
     mqtt_topic: String,
     log_level: Option<String>,
+    terminate_on_error: Option<bool>,
     influxdb: InfluxConfig,
     measurements: Vec<MeasurementConfig>,
 }
@@ -126,16 +127,24 @@ async fn main() -> Result<()> {
 
     info!("Connected to MQTT and subscribed to {}", config.mqtt_topic);
 
+    let terminate_on_error = config.terminate_on_error.unwrap_or(false);
+
     loop {
         match eventloop.poll().await {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
                 if let Err(e) = process_message(&publish.payload, &config, &influx_client).await {
                     error!("Error processing message: {}", e);
+                    if terminate_on_error {
+                        return Err(e);
+                    }
                 }
             }
             Ok(_) => {}
             Err(e) => {
                 error!("Error in event loop: {}", e);
+                if terminate_on_error {
+                    return Err(e.into());
+                }
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }

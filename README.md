@@ -10,6 +10,7 @@ A lightweight Rust tool that subscribes to an MQTT topic, extracts data points f
 - **InfluxDB Support**: Supports both InfluxDB v1 (Database/Retention Policy) and InfluxDB v2 (Bucket/Org/Token).
 - **Custom Tags**: Add static tags to your measurements for better filtering and grouping in InfluxDB.
 - **Configurable Logging**: Set the log level (debug, info, warn, error) via configuration.
+- **Optional Termination**: Optionally terminate the program if an error occurs during message processing or in the MQTT event loop.
 
 ## Installation
 
@@ -51,6 +52,7 @@ mqtt_host = "localhost"
 mqtt_port = 1883
 mqtt_topic = "sensors/data"
 log_level = "info" # debug, info, warn, error
+terminate_on_error = false # terminate if an error occurs
 
 [influxdb]
 version = 2 # 1 or 2
@@ -75,6 +77,7 @@ path = "$.sensors.hum"
 - **`mqtt_host`**: Address of the MQTT broker.
 - **`mqtt_port`**: Port of the MQTT broker (usually 1883).
 - **`mqtt_topic`**: The topic to subscribe to. The bridge expects JSON payloads on this topic.
+- **`terminate_on_error`**: (Optional) If set to `true`, the program will terminate if an error occurs during message processing or in the MQTT event loop. Defaults to `false`.
 - **`influxdb.version`**: Set to `1` for InfluxDB 1.x or `2` for InfluxDB 2.x/Cloud.
 - **`influxdb.token`**: 
     - For v2: Your API token.
