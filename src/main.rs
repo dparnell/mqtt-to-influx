@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use clap::Parser;
 use evalexpr::{eval_with_context_mut, HashMapContext, Value, ContextWithMutableVariables};
 use jsonpath_rust::JsonPathFinder;
 use log::{debug, error, info};
@@ -97,9 +98,19 @@ impl InfluxClient {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to the configuration file
+    #[arg(short, long, default_value = "config.toml")]
+    config: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config_content = fs::read_to_string("config.toml")?;
+    let args = Args::parse();
+    let config_content = fs::read_to_string(&args.config)
+        .map_err(|e| anyhow!("Failed to read config file {}: {}", args.config, e))?;
     let config: Config = toml::from_str(&config_content)?;
 
     let log_level = config.log_level.as_deref().unwrap_or("info");

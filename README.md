@@ -36,6 +36,12 @@ The binary will be available at `target/release/mqtt-to-influx`.
 ./mqtt-to-influx
 ```
 
+By default, the tool looks for `config.toml` in the current directory. You can specify a custom configuration file using the `-c` or `--config` option:
+
+```bash
+./mqtt-to-influx --config /path/to/your/config.toml
+```
+
 ## Configuration
 
 The tool expects a `config.toml` file with the following structure:
