@@ -1,0 +1,19 @@
+mqtt_host = "central.localdomain"
+mqtt_port = 1883
+mqtt_topic = "/envoy/json"
+
+[influxdb]
+version = 1 # or 1
+url = "http://central.localdomain:8086"
+bucket = "house" # database name for v1
+org = "myorg" # ignored for v1
+token = "" # username:password or empty for v1
+
+[[measurements]]
+name = "power_consumption"
+path = "$.meters.load.agg_p_mw"
+expression = "value / 1000.0" # optional expression, 'value' is the placeholder
+
+#[[measurements]]
+#name = "humidity"
+#path = "$.hum"

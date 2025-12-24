@@ -1,0 +1,157 @@
+use anyhow::{anyhow, Result};
+use evalexpr::{eval_with_context_mut, HashMapContext, Value, ContextWithMutableVariables};
+use jsonpath_rust::JsonPathFinder;
+use log::{error, info};
+use rumqttc::{AsyncClient, MqttOptions, QoS, Event, Packet};
+use serde::Deserialize;
+use std::fs;
+use std::time::Duration;
+
+#[derive(Debug, Deserialize, Clone)]
+struct Config {
+    mqtt_host: String,
+    mqtt_port: u16,
+    mqtt_topic: String,
+    influxdb: InfluxConfig,
+    measurements: Vec<MeasurementConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct InfluxConfig {
+    version: u8,
+    url: String,
+    bucket: String,
+    org: Option<String>,
+    token: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct MeasurementConfig {
+    name: String,
+    path: String,
+    expression: Option<String>,
+}
+
+enum InfluxClient {
+    V1(influxdb::Client),
+    V2(influxdb2::Client),
+}
+
+impl InfluxClient {
+    fn new(config: &InfluxConfig) -> Self {
+        match config.version {
+            1 => {
+                let client = influxdb::Client::new(&config.url, &config.bucket);
+                let client = if let Some(token) = &config.token {
+                    let parts: Vec<&str> = token.split(':').collect();
+                    if parts.len() == 2 {
+                        client.with_auth(parts[0], parts[1])
+                    } else {
+                        client
+                    }
+                } else {
+                    client
+                };
+                InfluxClient::V1(client)
+            }
+            2 => {
+                let client = influxdb2::Client::new(
+                    &config.url,
+                    config.org.as_deref().unwrap_or(""),
+                    config.token.as_deref().unwrap_or(""),
+                );
+                InfluxClient::V2(client)
+            }
+            _ => panic!("Unsupported InfluxDB version: {}", config.version),
+        }
+    }
+
+    async fn write(&self, measurement: &str, value: f64, bucket: &str) -> Result<()> {
+        match self {
+            InfluxClient::V1(client) => {
+                let query = influxdb::WriteQuery::new(chrono::Utc::now().into(), measurement)
+                    .add_field("value", value);
+                client.query(query).await.map_err(|e: influxdb::Error| anyhow!(e))?;
+            }
+            InfluxClient::V2(client) => {
+                let data_point = influxdb2::models::DataPoint::builder(measurement)
+                    .field("value", value)
+                    .build()?;
+                client.write(bucket, tokio_stream::iter(vec![data_point])).await?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+
+    let config_content = fs::read_to_string("config.toml")?;
+    let config: Config = toml::from_str(&config_content)?;
+
+    let influx_client = InfluxClient::new(&config.influxdb);
+
+    let mut mqttoptions = MqttOptions::new("mqtt_to_influx_bridge", &config.mqtt_host, config.mqtt_port);
+    mqttoptions.set_keep_alive(Duration::from_secs(5));
+
+    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    client.subscribe(&config.mqtt_topic, QoS::AtLeastOnce).await?;
+
+    info!("Connected to MQTT and subscribed to {}", config.mqtt_topic);
+
+    loop {
+        match eventloop.poll().await {
+            Ok(Event::Incoming(Packet::Publish(publish))) => {
+                if let Err(e) = process_message(&publish.payload, &config, &influx_client).await {
+                    error!("Error processing message: {}", e);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                error!("Error in event loop: {}", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
+
+async fn process_message(payload: &[u8], config: &Config, influx_client: &InfluxClient) -> Result<()> {
+    let payload_str = std::str::from_utf8(payload)?;
+    let json: serde_json::Value = serde_json::from_str(payload_str)?;
+
+    for m_config in &config.measurements {
+        let finder = JsonPathFinder::from_str(&json.to_string(), &m_config.path)
+            .map_err(|e| anyhow!("Invalid JSONPath {}: {}", m_config.path, e))?;
+        
+        let found = finder.find();
+        
+        if let Some(val) = found.as_array().and_then(|a| a.first()) {
+            let mut float_val = if val.is_number() {
+                val.as_f64().unwrap_or(0.0)
+            } else if val.is_string() {
+                val.as_str().unwrap_or("0").parse::<f64>().unwrap_or(0.0)
+            } else {
+                continue;
+            };
+
+            if let Some(expr) = &m_config.expression {
+                let mut context = HashMapContext::new();
+                context.set_value("value".into(), Value::Float(float_val))?;
+                if let Ok(eval_res) = eval_with_context_mut(expr, &mut context) {
+                    if let Ok(f) = eval_res.as_float() {
+                        float_val = f;
+                    } else if let Ok(i) = eval_res.as_int() {
+                        float_val = i as f64;
+                    }
+                }
+            }
+
+            info!("Writing measurement: {} = {}", m_config.name, float_val);
+            influx_client.write(&m_config.name, float_val, &config.influxdb.bucket).await?;
+        }
+    }
+
+    Ok(())
+}
