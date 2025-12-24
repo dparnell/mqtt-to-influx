@@ -1,6 +1,7 @@
 mqtt_host = "central.localdomain"
 mqtt_port = 1883
 mqtt_topic = "/envoy/json"
+log_level = "info"
 
 [influxdb]
 version = 1 # or 1

@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use evalexpr::{eval_with_context_mut, HashMapContext, Value, ContextWithMutableVariables};
 use jsonpath_rust::JsonPathFinder;
-use log::{error, info};
+use log::{debug, error, info};
 use rumqttc::{AsyncClient, MqttOptions, QoS, Event, Packet};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -13,6 +13,7 @@ struct Config {
     mqtt_host: String,
     mqtt_port: u16,
     mqtt_topic: String,
+    log_level: Option<String>,
     influxdb: InfluxConfig,
     measurements: Vec<MeasurementConfig>,
 }
@@ -98,10 +99,11 @@ impl InfluxClient {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
-
     let config_content = fs::read_to_string("config.toml")?;
     let config: Config = toml::from_str(&config_content)?;
+
+    let log_level = config.log_level.as_deref().unwrap_or("info");
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or(log_level));
 
     let influx_client = InfluxClient::new(&config.influxdb);
 
@@ -160,7 +162,7 @@ async fn process_message(payload: &[u8], config: &Config, influx_client: &Influx
                 }
             }
 
-            info!("Writing measurement: {} = {}", m_config.name, float_val);
+            debug!("Writing measurement: {} = {}", m_config.name, float_val);
             influx_client.write(&m_config.name, float_val, &config.influxdb.bucket, &m_config.tags).await?;
         }
     }
