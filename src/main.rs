@@ -4,6 +4,7 @@ use jsonpath_rust::JsonPathFinder;
 use log::{error, info};
 use rumqttc::{AsyncClient, MqttOptions, QoS, Event, Packet};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ struct MeasurementConfig {
     name: String,
     path: String,
     expression: Option<String>,
+    tags: Option<HashMap<String, String>>,
 }
 
 enum InfluxClient {
@@ -66,17 +68,27 @@ impl InfluxClient {
         }
     }
 
-    async fn write(&self, measurement: &str, value: f64, bucket: &str) -> Result<()> {
+    async fn write(&self, measurement: &str, value: f64, bucket: &str, tags: &Option<HashMap<String, String>>) -> Result<()> {
         match self {
             InfluxClient::V1(client) => {
-                let query = influxdb::WriteQuery::new(chrono::Utc::now().into(), measurement)
+                let mut query = influxdb::WriteQuery::new(chrono::Utc::now().into(), measurement)
                     .add_field("value", value);
+                if let Some(tags) = tags {
+                    for (key, val) in tags {
+                        query = query.add_tag(key.clone(), val.clone());
+                    }
+                }
                 client.query(query).await.map_err(|e: influxdb::Error| anyhow!(e))?;
             }
             InfluxClient::V2(client) => {
-                let data_point = influxdb2::models::DataPoint::builder(measurement)
-                    .field("value", value)
-                    .build()?;
+                let mut builder = influxdb2::models::DataPoint::builder(measurement)
+                    .field("value", value);
+                if let Some(tags) = tags {
+                    for (key, val) in tags {
+                        builder = builder.tag(key, val);
+                    }
+                }
+                let data_point = builder.build()?;
                 client.write(bucket, tokio_stream::iter(vec![data_point])).await?;
             }
         }
@@ -149,7 +161,7 @@ async fn process_message(payload: &[u8], config: &Config, influx_client: &Influx
             }
 
             info!("Writing measurement: {} = {}", m_config.name, float_val);
-            influx_client.write(&m_config.name, float_val, &config.influxdb.bucket).await?;
+            influx_client.write(&m_config.name, float_val, &config.influxdb.bucket, &m_config.tags).await?;
         }
     }
 

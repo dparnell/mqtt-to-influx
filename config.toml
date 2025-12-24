@@ -6,14 +6,21 @@ mqtt_topic = "/envoy/json"
 version = 1 # or 1
 url = "http://central.localdomain:8086"
 bucket = "house" # database name for v1
-org = "myorg" # ignored for v1
+org = "" # ignored for v1
 token = "" # username:password or empty for v1
 
 [[measurements]]
 name = "power_consumption"
 path = "$.meters.load.agg_p_mw"
 expression = "value / 1000.0" # optional expression, 'value' is the placeholder
+tags = { tag = "iem-net" }
 
-#[[measurements]]
-#name = "humidity"
-#path = "$.hum"
+[[measurements]]
+name = "power_production"
+path = "$.meters.pv.agg_p_mw"
+expression = "value / 1000.0" # optional expression, 'value' is the placeholder
+
+[[measurements]]
+name = "power_usage"
+path = "$.meters.grid.agg_p_mw"
+expression = "value / 1000.0" # optional expression, 'value' is the placeholder
